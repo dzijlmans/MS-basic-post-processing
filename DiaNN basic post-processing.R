@@ -112,7 +112,7 @@ if (parameters$conditions == 3) {
     proteinGroups %>% pivot_wider(names_from = c("condition_A", "replicate"),         #change this if necessary
                                   values_from = "values")
   datalist_B <- split(proteinGroups, f = ~ proteinGroups$condition_B)               #specify variable to be split on
-  for (i in 1:length(datalist_carrier)) {
+  for (i in 1:length(datalist_B)) {
     name_B <- names(datalist_B[i])
     data <- datalist_B[[i]]
     value_columns <- which(sapply(data, is.numeric))
