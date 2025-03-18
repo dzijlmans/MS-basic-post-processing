@@ -5,39 +5,122 @@ library(openxlsx)
 library(ggrepel)
 library(tcltk)
 library(PTXQC)
-tkmessageBox(message="Choose your working directory. Make sure that the `Analysis_parameters`, `pg_matrix.tsv` and 'pr_matrix.tsv' are located in your working directory ")
-setwd(tk_choose.dir())
 
-tkmessageBox(message="Please ensure that the abundance column names (and thus the .raw files) contain the name of the mass spectrometer used (e.g. Astral, Exploris) and the following information, in order and separated by an underscore:
+setwd(tk_choose.dir())
+parameters <- read.xlsx("Analysis_parameters.xlsx")
+
+#DiaNN pre-processing
+if (parameters$Analysis.method == "DiaNN") {
+  tkmessageBox(message="Make sure that the 'pg_matrix.tsv' and 'pr_matrix.tsv' files are located in your working directory.
+  
+  Please ensure that the abundance column names (and thus the .raw files) contain the name of the mass spectrometer used (e.g. Astral, Exploris) and the following information, in order and separated by an underscore:
 
 - Condition A (e.g. Cell line)
 - Condition B (e.g. WT and KO or treated and untreated)
 - Replicate
              
 Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw")
+  
+  proteinGroups <- read.delim(list.files(pattern = "pg_matrix.tsv"))
+  peptides <- read.delim(list.files(pattern = "pr_matrix.tsv"))
+  
+  filtered_proteinGroups <- data.frame(
+    Protein.Group = names(table(unique(peptides[, c('Protein.Group', 'Stripped.Sequence')])$Protein.Group)),
+    Peptide.Count = as.integer(table(unique(peptides[, c('Protein.Group', 'Stripped.Sequence')])$Protein.Group))
+  ) %>% 
+    filter(Peptide.Count > 2)
+  
+  proteinGroups <- proteinGroups[proteinGroups$Protein.Group %in% filtered_proteinGroups$Protein.Group, ]
+  
+  proteinGroups <-
+    make_unique(proteinGroups, "Genes", "Protein.Group", delim = ";")
+  proteinGroups <- proteinGroups %>% filter(!grepl("Cont_", ID) &
+                                              !grepl("KRT", name) &
+                                              !grepl("cRAP", name))
+  
+  value_columns <- which(str_detect(names(proteinGroups), parameters$mass_spec))
+  prefix <- LCSn(colnames(proteinGroups[, value_columns]))
+  colnames(proteinGroups) <- gsub(".raw", "", gsub(".*" %>% paste0(prefix), "", colnames(proteinGroups)))
+  
+}
 
-#import and clean data
-parameters <- read.xlsx("Analysis_parameters.xlsx")
-proteinGroups <- read.delim(list.files(pattern = "pg_matrix.tsv"))
-peptides <- read.delim(list.files(pattern = "pr_matrix.tsv"))
 
-filtered_proteinGroups <- data.frame(
-  Protein.Group = names(table(unique(peptides[, c('Protein.Group', 'Stripped.Sequence')])$Protein.Group)),
-  Peptide.Count = as.integer(table(unique(peptides[, c('Protein.Group', 'Stripped.Sequence')])$Protein.Group))
-) %>% 
-  filter(Peptide.Count > 2)
+#MaxQuant pre-processing
+if (parameters$Analysis.method == "MaxQuant") {
+  tkmessageBox(message="Make sure that the 'proteinGroups.txt' file is located in your working directory.
+  
+  Please ensure that the abundance column names (and thus the .raw files) contain the following information, in order and separated by an underscore:
 
-proteinGroups <- proteinGroups[proteinGroups$Protein.Group %in% filtered_proteinGroups$Protein.Group, ]
+- Condition A (e.g. Cell line)
+- Condition B (e.g. WT and KO or treated and untreated)
+- Replicate
+             
+Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw")
+  
+  proteinGroups <- read.delim(list.files(pattern = "proteinGroups.txt"))
+  
+  proteinGroups$Only.identified.by.site[is.na(proteinGroups$Only.identified.by.site)] <- ""
+  proteinGroups$Reverse[is.na(proteinGroups$Reverse)] <- ""
+  proteinGroups$Potential.contaminant[is.na(proteinGroups$Potential.contaminant)] <- ""
+  
+  proteinGroups <-
+    filter(
+      proteinGroups,
+      Reverse != "+",
+      Potential.contaminant != "+",
+      Only.identified.by.site != "+",
+      Unique.peptides > 1
+    )
+  
+  proteinGroups <- proteinGroups %>% dplyr::select(
+    Protein.IDs = "Protein.IDs",
+    "Gene.names",
+    "Unique.peptides",
+    contains("LFQ.intensity."),
+  )
+  proteinGroups <-
+    make_unique(proteinGroups, "Gene.names", "Protein.IDs", delim = ";")
+  
+  value_columns <- which(str_detect(names(proteinGroups), "LFQ.intensity"))               #specify Mass spec (this should be in the value column names)
+  prefix <- LCSn(colnames(proteinGroups[, value_columns]))
+  colnames(proteinGroups) <- gsub(".raw", "", gsub(".*" %>% paste0(prefix), "", colnames(proteinGroups)))
+  
+}
 
-proteinGroups <-
-  make_unique(proteinGroups, "Genes", "Protein.Group", delim = ";")
-proteinGroups <- proteinGroups %>% filter(!grepl("Cont_", ID) &
-                                            !grepl("KRT", name))
 
-###tidy column names
-value_columns <- which(str_detect(names(proteinGroups), parameters$mass_spec))               #specify Mass spec (this should be in the value column names)
-prefix <- LCSn(colnames(proteinGroups[, value_columns]))
-colnames(proteinGroups) <- gsub(".raw", "", gsub(".*" %>% paste0(prefix), "", colnames(proteinGroups)))
+#Proteome Discoverer pre-processing
+if (parameters$Analysis.method == "Proteome Discoverer") {
+  tkmessageBox(message="Make sure that the 'Proteins.txt' file is located in your working directory.
+  
+  Please ensure that the abundance column names (and thus the .raw files) contain the following information, in order and separated by an underscore:
+
+- Condition A (e.g. Cell line)
+- Condition B (e.g. WT and KO or treated and untreated)
+- Replicate
+             
+Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw")
+  
+  proteinGroups <- read.delim(list.files(pattern = "Proteins.txt"))
+  
+  proteinGroups <- filter(proteinGroups, proteinGroups[, grep("Unique", colnames(proteinGroups))] > 2)
+  
+  proteinGroups <- proteinGroups %>% dplyr::select(
+    "Accession",
+    colnames(proteinGroups)[grep("Unique", colnames(proteinGroups))],
+    "Gene.Symbol",
+    contains("Abundances") & contains("Normalized")
+  )
+  
+  proteinGroups <-
+    make_unique(proteinGroups, "Gene.Symbol", "Accession", delim = ";")
+  
+  value_columns <- which(str_detect(names(proteinGroups), "Abundances..Normalized"))
+  # Use gsub to trim everything before "Sample" or "Control"
+  colnames(proteinGroups) <- gsub("\\.\\.", "_", gsub(".*(Sample|Control)\\.\\.(.*)", "\\2", colnames(proteinGroups)))
+  
+}
+
+
 ##QC
 try(if (max(str_count(colnames(proteinGroups[, value_columns]), "_")) == 1 &
         parameters$conditions != 2 |
@@ -167,5 +250,5 @@ if (parameters$conditions == 3) {
 }
 
 
-save.image(paste0(getwd(), "/DiaNN - DEP analysis.RData"))
+save.image(paste0(getwd(), paste0("/", parameters$Analysis.method, " - DEP analysis.RData")))
 
