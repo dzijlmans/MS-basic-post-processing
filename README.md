@@ -3,7 +3,7 @@ So you analyzed your mass spectrometry raw files and want to some post-processin
 ## Getting started
 
 Getting started is easy. Download the R script and analysis parameters file to your working directory. To do this:
-- Click on the big green button that says ```<> Code``` and then click on ```Download ZIP```.
+- Click on the big green button in te top right that says ```<> Code``` and then click on ```Download ZIP```.
 - Place the files in your working directory
 - Fill in the analysis parameter file accordingly.
 - Open the R script with RStudio, select all and [run it](https://www.youtube.com/watch?v=w6QGe-pXgdI).
