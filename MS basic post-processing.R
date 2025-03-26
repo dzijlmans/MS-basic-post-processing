@@ -28,7 +28,7 @@ Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw")
     Protein.Group = names(table(unique(peptides[, c('Protein.Group', 'Stripped.Sequence')])$Protein.Group)),
     Peptide.Count = as.integer(table(unique(peptides[, c('Protein.Group', 'Stripped.Sequence')])$Protein.Group))
   ) %>% 
-    filter(Peptide.Count > 2)
+    filter(Peptide.Count > (parameters$unique_peptides - 1))
   
   proteinGroups <- proteinGroups[proteinGroups$Protein.Group %in% filtered_proteinGroups$Protein.Group, ]
   
@@ -69,7 +69,7 @@ Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw")
       Reverse != "+",
       Potential.contaminant != "+",
       Only.identified.by.site != "+",
-      Unique.peptides > 1
+      Unique.peptides > (parameters$unique_peptides - 1)
     )
   
   proteinGroups <- proteinGroups %>% dplyr::select(
@@ -102,7 +102,7 @@ Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw")
   
   proteinGroups <- read.delim(list.files(pattern = "Proteins.txt"))
   
-  proteinGroups <- filter(proteinGroups, proteinGroups[, grep("Unique", colnames(proteinGroups))] > 2)
+  proteinGroups <- filter(proteinGroups, proteinGroups[, grep("Unique", colnames(proteinGroups))] > (parameters$unique_peptides - 1))
   
   proteinGroups <- proteinGroups %>% dplyr::select(
     "Accession",
@@ -129,9 +129,9 @@ try(if (max(str_count(colnames(proteinGroups[, value_columns]), "_")) == 1 &
   stop("incorrect number of conditions"))
 
 
-results_A <- list()
 
 if (parameters$conditions == 2) {
+  results_A <- list()
   data <- proteinGroups
   experimental_design <- data.frame(label = colnames(data[, value_columns]))
   experimental_design <- experimental_design %>% separate_wider_delim(
@@ -158,11 +158,9 @@ if (parameters$conditions == 2) {
     "_diff"
   ))
   dep <- add_rejections(data_diff_manual, alpha = 0.05, lfc = log2(2))
-  for (p in 1:length(contrast)) {
-    results_A[[paste0(contrast[p])]] <- get_results(dep)
-  }
+  
   ####make pdf containing QCs
-  pdf(paste0(contrast, ".pdf"))
+  pdf("Output_plots.pdf")
   
   print(plot_frequency(data_se))
   print(plot_numbers(data_filt))
@@ -171,19 +169,52 @@ if (parameters$conditions == 2) {
   }
   print(plot_normalization(data_filt, data_norm, data_imp))
   print(plot_imputation(data_norm, data_imp))
+  
+  #add dataframe for each contrast to list
   for (p in 1:length(contrast)) {
-    print(plot_volcano(
-      dep,
-      contrast = contrast[p],
-      label_size = 2,
-      add_names = TRUE
-    ))
+    results <- get_results(dep) %>% select(name, ID, contains(contrast[p]) &
+                                             (contains("p.val") | contains("ratio")))
+    colnames(results) <- sub("ratio", "log2.FC", colnames(results))
+    results <- results %>% mutate(!!paste0(contrast[p], "_p.adj") := p.adjust(get(paste0(contrast[p], "_p.val")), method = "BH"))
+    
+    results_A[[contrast[p]]] <- results
+    
+    left <- str_split(contrast[p], pattern = "_vs_")[[1]][1]
+    right <- str_split(contrast[p], pattern = "_vs_")[[1]][2]
+    p_val_column <- grep("_p.val$", names(results), value = TRUE)
+    log2_fc_column <- grep("_log2.FC$", names(results), value = TRUE)
+    
+    if (parameters$volcano == "protein list") {
+      proteins_to_highlight <- str_split(parameters$proteins_to_highlight, "; ")[[1]]
+    }
+    
+    if (parameters$volcano == "specify significance") {
+      proteins_to_highlight <- results$name[results[[p_val_column]] < parameters$p_value & abs(results[[log2_fc_column]]) > parameters$log2_FC]
+    }
+    
+    if (parameters$volcano == "TopN") {
+      sorted_results <- results[order(abs(results[[log2_fc_column]]), decreasing = TRUE), ]
+      proteins_to_highlight <- head(sorted_results[sorted_results[[p_val_column]] < 0.05, ], parameters$TopN)$name
+    }
+    
+    print(ggplot(results, aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]]))) + 
+      geom_point(color = "grey50", alpha = 0.5) +
+      geom_point(data = results[results$name%in%proteins_to_highlight, ], aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]])), color = "red", alpha = 0.5) +
+      geom_text_repel(data = results[results$name%in%proteins_to_highlight, ], aes(label = name)) +
+      geom_hline(yintercept = -log10(parameters$p_value),linetype="dashed", color = "black") +
+      geom_vline(xintercept = c(-parameters$log2_FC, parameters$log2_FC),linetype="dashed", color = "black") +
+      theme_bw(base_size = 12) +
+      xlab(paste0("log2 FC (", left, " / ", right, ")")) +
+      ylab("-log10(p-value)") +
+      ggtitle(paste0(left, " vs ", right)))
   }
   dev.off()
   write.xlsx(results_A, paste0("DEP_results.xlsx"))
+  rm(results_A)
 }
 
 if (parameters$conditions == 3) {
+  results_A <- list()
   proteinGroups <-
   proteinGroups %>% pivot_longer(
     cols = all_of(value_columns),
@@ -223,11 +254,9 @@ if (parameters$conditions == 3) {
       "_diff"
     ))
     dep <- add_rejections(data_diff_manual, alpha = 0.05, lfc = log2(2))
-    for (p in 1:length(contrast)) {
-      results_A[[paste0(name_B, "_", contrast[p])]] <- get_results(dep)
-    }
+    
     ####make pdf containing QCs
-    pdf(paste0(name_B, "_", contrast, ".pdf"))
+    pdf(paste0("Output_plots_", name_B, ".pdf"))
     
     print(plot_frequency(data_se))
     print(plot_numbers(data_filt))
@@ -236,17 +265,50 @@ if (parameters$conditions == 3) {
     }
     print(plot_normalization(data_filt, data_norm, data_imp))
     print(plot_imputation(data_norm, data_imp))
+    
+    #add all results to list
+    results_A[[paste0(name_B)]] <- get_results(dep)
+    #add dataframe for each contrast to list
     for (p in 1:length(contrast)) {
-      print(plot_volcano(
-        dep,
-        contrast = contrast[p],
-        label_size = 2,
-        add_names = TRUE
-      ))
+      results <- get_results(dep) %>% select(name, ID, contains(contrast[p]) & (contains("p.val") | contains("ratio")))
+      colnames(results) <- sub("ratio", "log2.FC", colnames(results))
+      results <- results %>% mutate(!!paste0(contrast[p], "_p.adj") := p.adjust(get(paste0(contrast[p], "_p.val")), method = "BH"))
+      
+      results_A[[paste0(name_B, "_", contrast[p])]] <- results
+      
+      left <- str_split(contrast[p], pattern = "_vs_")[[1]][1]
+      right <- str_split(contrast[p], pattern = "_vs_")[[1]][2]
+      p_val_column <- grep("_p.val$", names(results), value = TRUE)
+      log2_fc_column <- grep("_log2.FC$", names(results), value = TRUE)
+      
+      if (parameters$volcano == "protein list") {
+        proteins_to_highlight <- str_split(parameters$proteins_to_highlight, "; ")[[1]]
+      }
+      
+      if (parameters$volcano == "specify significance") {
+        proteins_to_highlight <- results$name[results[[p_val_column]] < parameters$p_value & abs(results[[log2_fc_column]]) > parameters$log2_FC]
+      }
+      
+      if (parameters$volcano == "TopN") {
+        sorted_results <- results[order(abs(results[[log2_fc_column]]), decreasing = TRUE), ]
+        proteins_to_highlight <- head(sorted_results[sorted_results[[p_val_column]] < 0.05, ], parameters$TopN)$name
+      }
+      
+      print(ggplot(results, aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]]))) + 
+              geom_point(color = "grey50", alpha = 0.5) +
+              geom_point(data = results[results$name%in%proteins_to_highlight, ], aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]])), color = "red", alpha = 0.5) +
+              geom_text_repel(data = results[results$name%in%proteins_to_highlight, ], aes(label = name)) +
+              geom_hline(yintercept = -log10(parameters$p_value),linetype="dashed", color = "black") +
+              geom_vline(xintercept = c(-parameters$log2_FC, parameters$log2_FC),linetype="dashed", color = "black") +
+              theme_bw(base_size = 12) +
+              xlab(paste0("log2 FC (", left, " / ", right, ")")) +
+              ylab("-log10(p-value)") +
+              ggtitle(paste0(left, " vs ", right)))
     }
     dev.off()
   }
   write.xlsx(results_A, paste0("DEP_results.xlsx"))
+  rm(results_A)
 }
 
 
