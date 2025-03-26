@@ -185,7 +185,7 @@ if (parameters$conditions == 2) {
     log2_fc_column <- grep("_log2.FC$", names(results), value = TRUE)
     
     if (parameters$volcano == "protein list") {
-      proteins_to_highlight <- str_split(parameters$proteins_to_highlight, "; ")[[1]]
+      proteins_to_highlight <- str_split(parameters$proteins_to_highlight, ";")[[1]]
     }
     
     if (parameters$volcano == "specify significance") {
@@ -282,7 +282,7 @@ if (parameters$conditions == 3) {
       log2_fc_column <- grep("_log2.FC$", names(results), value = TRUE)
       
       if (parameters$volcano == "protein list") {
-        proteins_to_highlight <- str_split(parameters$proteins_to_highlight, "; ")[[1]]
+        proteins_to_highlight <- str_split(parameters$proteins_to_highlight, ";")[[1]]
       }
       
       if (parameters$volcano == "specify significance") {
