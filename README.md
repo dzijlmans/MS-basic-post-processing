@@ -12,7 +12,7 @@ Getting started is easy. Download the R script and analysis parameters file to y
 
 Explanations are also present in the Excel file, when hovering over the parameter boxes.
 
-```Analysis method``` - One of "DiaNN", "MaxQuant" or "Proteome discoverer".
+```analysis_method``` - One of "DiaNN", "MaxQuant" or "Proteome discoverer".
 
 ```conditions``` - The amount of experimental variables. This can be either 2 (Condition A, Replicates) or 3 (Condition B, Condition A, Replicates). These variables should be present in the .raw file names.
 
@@ -26,7 +26,7 @@ Explanations are also present in the Excel file, when hovering over the paramete
 
 ```unique_peptides``` - The minimum amount of unique peptides a protein should be quantified with.
 
-```volcano``` - Specifiy which proteins to highlight in the volcano plot. Can be either a list of supplied protein names ("protein list"), all proteins above a supplied p-value and fold change cutoff ("specify significance") or the top N most differential proteins below a set p-value.
+```volcano``` - Specifiy which proteins to highlight in the volcano plot. Can be either a list of supplied protein names ("protein list"), all proteins above a supplied p-value and fold change cutoff ("specify significance") or the top N most differential proteins below a set p-value ("TopN").
 
 ```proteins_to_highlight``` - list of protein names to be highlighted, separated by a semiolon (;).
 
@@ -40,4 +40,4 @@ Explanations are also present in the Excel file, when hovering over the paramete
 
 ### Credit
 
-This script uses a lot of the DEP package, so credit to them for developing the package (Zhang X, Smits A, van Tilburg G, Ovaa H, Huber W, Vermeulen M (2018). “Proteome-wide identification of ubiquitin interactions using UbIA-MS.” Nature Protocols, 13, 530–550)
+This script uses a lot of the DEP package, so credit to them for developing the package [(Zhang X, Smits A, van Tilburg G, Ovaa H, Huber W, Vermeulen M (2018). “Proteome-wide identification of ubiquitin interactions using UbIA-MS.” Nature Protocols, 13, 530–550)](https://www.nature.com/articles/nprot.2017.147).
