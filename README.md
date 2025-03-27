@@ -8,6 +8,8 @@ Getting started is easy. Download the R script and analysis parameters file to y
 - Fill in the analysis parameter file accordingly.
 - Open the R script with RStudio, select all and [run it](https://www.youtube.com/watch?v=w6QGe-pXgdI).
 
+**Note:** - Installing the DEP package fr the first time may take a while. Should be smooth sailing after that
+
 ## Parameters explained
 
 Explanations are also present in the Excel file, when hovering over the parameter boxes.
@@ -28,7 +30,7 @@ Explanations are also present in the Excel file, when hovering over the paramete
 
 ```volcano``` - Specifiy which proteins to highlight in the volcano plot. Can be either a list of supplied protein names ("protein list"), all proteins above a supplied p-value and fold change cutoff ("specify significance") or the top N most differential proteins below a set p-value ("TopN").
 
-```proteins_to_highlight``` - list of protein names to be highlighted, separated by a semiolon (;).
+```proteins_to_highlight``` - list of protein names to be highlighted, separated by a semicolon (;).
 
 ```p_value``` - p-value cutoff for significance. **REQUIRED**
 
