@@ -1,16 +1,12 @@
 #Starting up
-library(tidyverse)
-library(DEP)
-library(openxlsx)
-library(ggrepel)
-library(tcltk)
-library(PTXQC)
+if (!require(pacman, quietly = TRUE)) install.packages("pacman")
+pacman::p_load(tidyverse, DEP, openxlsx, ggrepel, tcltk, PTXQC)
 
 setwd(tk_choose.dir())
 parameters <- read.xlsx("Analysis_parameters.xlsx")
 
 #DiaNN pre-processing
-if (parameters$Analysis.method == "DiaNN") {
+if (parameters$analysis_method == "DiaNN") {
   tkmessageBox(message="Make sure that the 'pg_matrix.tsv' and 'pr_matrix.tsv' files are located in your working directory.
   
   Please ensure that the abundance column names (and thus the .raw files) contain the name of the mass spectrometer used (e.g. Astral, Exploris) and the following information, in order and separated by an underscore:
@@ -36,7 +32,8 @@ Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw")
     make_unique(proteinGroups, "Genes", "Protein.Group", delim = ";")
   proteinGroups <- proteinGroups %>% filter(!grepl("Cont_", ID) &
                                               !grepl("KRT", name) &
-                                              !grepl("cRAP", name))
+                                              !grepl("cRAP", name) &
+                                              !grepl("cRAP", Protein.Group))
   
   value_columns <- which(str_detect(names(proteinGroups), parameters$mass_spec))
   prefix <- LCSn(colnames(proteinGroups[, value_columns]))
@@ -46,7 +43,7 @@ Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw")
 
 
 #MaxQuant pre-processing
-if (parameters$Analysis.method == "MaxQuant") {
+if (parameters$analysis_method == "MaxQuant") {
   tkmessageBox(message="Make sure that the 'proteinGroups.txt' file is located in your working directory.
   
   Please ensure that the abundance column names (and thus the .raw files) contain the following information, in order and separated by an underscore:
@@ -89,7 +86,7 @@ Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw")
 
 
 #Proteome Discoverer pre-processing
-if (parameters$Analysis.method == "Proteome Discoverer") {
+if (parameters$analysis_method == "Proteome Discoverer") {
   tkmessageBox(message="Make sure that the 'Proteins.txt' file is located in your working directory.
   
   Please ensure that the abundance column names (and thus the .raw files) contain the following information, in order and separated by an underscore:
@@ -209,6 +206,31 @@ if (parameters$conditions == 2) {
       ggtitle(paste0(left, " vs ", right)))
   }
   dev.off()
+  
+  if (parameters$complete_output == TRUE) {
+    datalist <- list()
+    #raw
+    df <- as.data.frame(assay(data_filt))
+    names(df) <- paste0(names(df), "_raw")
+    df$name <- row.names(df)
+    datalist[["raw"]] <- df
+    #normalized
+    df <- as.data.frame(assay(data_norm))
+    names(df) <- paste0(names(df), "_normalized")
+    df$name <- row.names(df)
+    datalist[["normalized"]] <- df  
+    #imputated
+    if (parameters$filtering_type == "condition") {
+      df <- as.data.frame(assay(data_imp))
+      names(df) <- paste0(names(df), "_imputated")
+      df$name <- row.names(df)
+      datalist[["imputated"]] <- df
+    }
+    complete_data <- reduce(datalist, merge, by = "name")
+    complete_data <- merge(complete_data, get_results(dep))
+    results_A[["complete_data"]] <- complete_data
+  }
+  
   write.xlsx(results_A, paste0("DEP_results.xlsx"))
   rm(results_A)
 }
@@ -266,8 +288,6 @@ if (parameters$conditions == 3) {
     print(plot_normalization(data_filt, data_norm, data_imp))
     print(plot_imputation(data_norm, data_imp))
     
-    #add all results to list
-    results_A[[paste0(name_B)]] <- get_results(dep)
     #add dataframe for each contrast to list
     for (p in 1:length(contrast)) {
       results <- get_results(dep) %>% select(name, ID, contains(contrast[p]) & (contains("p.val") | contains("ratio")))
@@ -306,11 +326,36 @@ if (parameters$conditions == 3) {
               ggtitle(paste0(left, " vs ", right)))
     }
     dev.off()
+    
+    if (parameters$complete_output == TRUE) {
+      datalist <- list()
+      #raw
+      df <- as.data.frame(assay(data_filt))
+      names(df) <- paste0(names(df), "_raw")
+      df$name <- row.names(df)
+      datalist[["raw"]] <- df
+      #normalized
+      df <- as.data.frame(assay(data_norm))
+      names(df) <- paste0(names(df), "_normalized")
+      df$name <- row.names(df)
+      datalist[["normalized"]] <- df  
+      #imputated
+      if (parameters$filtering_type == "condition") {
+        df <- as.data.frame(assay(data_imp))
+        names(df) <- paste0(names(df), "_imputated")
+        df$name <- row.names(df)
+        datalist[["imputated"]] <- df
+      }
+      complete_data <- reduce(datalist, merge, by = "name")
+      complete_data <- merge(complete_data, get_results(dep))
+      results_A[[paste0(name_B, "_complete_data")]] <- complete_data
+    }
+    
   }
   write.xlsx(results_A, paste0("DEP_results.xlsx"))
   rm(results_A)
 }
 
 
-save.image(paste0(getwd(), paste0("/", parameters$Analysis.method, " - DEP analysis.RData")))
+save.image(paste0(getwd(), paste0("/", parameters$analysis_method, " - DEP analysis.RData")))
 
