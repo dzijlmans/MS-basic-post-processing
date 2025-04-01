@@ -8,7 +8,7 @@ Getting started is easy. Download the R script and analysis parameters file to y
 - Fill in the analysis parameter file accordingly.
 - Open the R script with RStudio, select all and [run it](https://www.youtube.com/watch?v=w6QGe-pXgdI).
 
-**Note:** - Installing the DEP package fr the first time may take a while. Should be smooth sailing after that
+**Note:** - Installing the DEP package for the first time may take a while. Should be smooth sailing after that
 
 ## Parameters explained
 
@@ -37,6 +37,8 @@ Explanations are also present in the Excel file, when hovering over the paramete
 ```log2_FC``` - log2 FC value cutoff for significance. **REQUIRED**
 
 ```TopN``` - TopN number of proteins to highlight.
+
+```complete_output``` - If set to TRUE, the 'DEP_results' output file will contain a tab titled 'complete_output' containing the raw, normalized and imputated LFQ values for each sample, as well as all columns from the dep results object.
 
 
 
