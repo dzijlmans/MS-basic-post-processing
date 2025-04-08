@@ -40,7 +40,22 @@ Explanations are also present in the Excel file, when hovering over the paramete
 
 ```complete_output``` - If set to TRUE, the 'DEP_results' output file will contain a tab titled 'complete_output' containing the raw, normalized and imputated LFQ values for each sample, as well as all columns from the dep results object.
 
+## File names
 
+Make sure your .raw files and output are correctly named, as outlined below. Otherwise the script may not run succesfully.
+
+```.raw mass spec files``` - Please ensure that the abundance column names (and thus the .raw files) contain the name of the mass spectrometer used (e.g. Astral, Exploris) and the following information, in order and separated by an underscore:
+- Condition A (e.g. Cell line)
+- Condition B (e.g. WT and KO or treated and untreated)
+- Replicate
+             
+Example: 20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw
+
+```DiaNN``` - Output files should end on ```*pg_matrix.tsv``` and ```*pr_matrix.tsv```.
+
+```MaxQuant``` - Output file should end on ```*proteinGroups.txt``` and the experiment name should follow a similar format as the ```.raw mass spec files```, as specified above.
+
+```Proteome Discoverer``` - Output file should end on ```*proteins.txt``` and the experiment name should follow a similar format as the ```.raw mass spec files```, as specified above.
 
 ### Credit
 
