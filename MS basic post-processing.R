@@ -1,6 +1,6 @@
 #Starting up
 if (!require(pacman, quietly = TRUE)) install.packages("pacman")
-pacman::p_load(tidyverse, DEP, openxlsx, ggrepel, tcltk, PTXQC)
+pacman::p_load(tidyverse, DEP, openxlsx, ggrepel, tcltk, PTXQC, SummarizedExperiment)
 
 setwd(tk_choose.dir())
 parameters <- read.xlsx("Analysis_parameters.xlsx")
@@ -226,7 +226,7 @@ if (parameters$conditions == 2) {
       df$name <- row.names(df)
       datalist[["imputated"]] <- df
     }
-    complete_data <- reduce(datalist, merge, by = "name")
+    complete_data <- purrr::reduce(datalist, merge, by = "name")
     complete_data <- merge(complete_data, get_results(dep))
     results_A[["complete_data"]] <- complete_data
   }
@@ -346,7 +346,7 @@ if (parameters$conditions == 3) {
         df$name <- row.names(df)
         datalist[["imputated"]] <- df
       }
-      complete_data <- reduce(datalist, merge, by = "name")
+      complete_data <- purrr::reduce(datalist, merge, by = "name")
       complete_data <- merge(complete_data, get_results(dep))
       results_A[[paste0(name_B, "_complete_data")]] <- complete_data
     }
