@@ -154,7 +154,7 @@ if (parameters$conditions == 2) {
     names(data_diff_manual@elementMetadata@listData),
     "_diff"
   ))
-  dep <- add_rejections(data_diff_manual, alpha = 0.05, lfc = log2(2))
+  dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
   
   ####make pdf containing QCs
   pdf("Output_plots.pdf")
@@ -275,7 +275,7 @@ if (parameters$conditions == 3) {
       names(data_diff_manual@elementMetadata@listData),
       "_diff"
     ))
-    dep <- add_rejections(data_diff_manual, alpha = 0.05, lfc = log2(2))
+    dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
     
     ####make pdf containing QCs
     pdf(paste0("Output_plots_", name_B, ".pdf"))
