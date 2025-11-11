@@ -131,12 +131,8 @@ if (parameters$conditions == 2) {
   results_A <- list()
   data <- proteinGroups
   experimental_design <- data.frame(label = colnames(data[, value_columns]))
-  experimental_design <- experimental_design %>% separate_wider_delim(
-    label,
-    delim = "_",
-    names = c("condition", "replicate"),
-    cols_remove = FALSE
-  )
+  experimental_design <- experimental_design %>% 
+    extract(label, into = c("condition", "replicate"), regex = "^(.*)_(.*)$", remove = FALSE)
   experimental_design <- experimental_design[, c("label", "condition", "replicate")]
   
   #Make object and do analysis
@@ -149,7 +145,14 @@ if (parameters$conditions == 2) {
   if (parameters$filtering_type == "condition") {
     data_imp <- impute(data_norm, fun = "MinProb", q = 0.01)
   }
-  data_diff_manual <- test_diff(data_imp, type = parameters$comparison, control = parameters$control)
+  if (parameters$comparison == "control") {
+    data_diff_manual <- test_diff(data_imp, type = "control", control = parameters$control)
+  } else if (parameters$comparison == "manual") {
+    manual_contrasts <- str_split(parameters$contrasts, ";")[[1]]
+    data_diff_manual <- test_diff(data_imp, type = "manual", test = manual_contrasts)
+  } else if (parameters$comparison == "all") {
+    data_diff_manual <- test_diff(data_imp, type = "all")
+  }
   contrast <- sub("_diff", "", str_subset(
     names(data_diff_manual@elementMetadata@listData),
     "_diff"
@@ -164,8 +167,14 @@ if (parameters$conditions == 2) {
   if (parameters$filtering_type == "condition") {
     print(plot_detect(data_filt))
   }
-  print(plot_normalization(data_filt, data_norm, data_imp))
-  print(plot_imputation(data_norm, data_imp))
+  if (parameters$filtering_type == "condition") {
+    print(plot_normalization(data_filt, data_norm, data_imp))
+  } else {
+    print(plot_normalization(data_filt, data_norm))
+  }
+  if (parameters$filtering_type == "condition") {
+    print(plot_imputation(data_norm, data_imp))
+  }
   
   #add dataframe for each contrast to list
   for (p in 1:length(contrast)) {
@@ -194,16 +203,62 @@ if (parameters$conditions == 2) {
       proteins_to_highlight <- head(sorted_results[sorted_results[[p_val_column]] < 0.05, ], parameters$TopN)$name
     }
     
-    print(ggplot(results, aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]]))) + 
-      geom_point(color = "grey50", alpha = 0.5) +
-      geom_point(data = results[results$name%in%proteins_to_highlight, ], aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]])), color = "red", alpha = 0.5) +
-      geom_text_repel(data = results[results$name%in%proteins_to_highlight, ], aes(label = name)) +
-      geom_hline(yintercept = -log10(parameters$p_value),linetype="dashed", color = "black") +
-      geom_vline(xintercept = c(-parameters$log2_FC, parameters$log2_FC),linetype="dashed", color = "black") +
-      theme_bw(base_size = 12) +
-      xlab(paste0("log2 FC (", left, " / ", right, ")")) +
-      ylab("-log10(p-value)") +
-      ggtitle(paste0(left, " vs ", right)))
+    print(
+      ggplot(results, aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]]))) +
+        geom_point(color = "grey60", alpha = 0.5) +
+        geom_point(data = results[results$name %in% proteins_to_highlight, ],
+                   color = "#E41A1C",
+                   alpha = 0.5) +
+        geom_text_repel(data = results[results$name %in% proteins_to_highlight, ],
+                        aes(label = name),
+                        max.overlaps = Inf,
+                        size = 3) +
+        geom_hline(yintercept = -log10(parameters$p_value), linetype = "dashed", color = "grey50") +
+        geom_vline(xintercept = c(-parameters$log2_FC, parameters$log2_FC), linetype = "dashed", color = "grey50") +
+        theme_bw(base_size = 12) +
+        xlab(paste0("log2 FC (", left, " / ", right, ")")) +
+        ylab("-log10(p-value)") +
+        ggtitle(paste0(left, " vs ", right))
+    )
+    
+    if (parameters$highlight_imputed == TRUE) {
+      proteins_imputed <- get_df_long(data_norm) %>%
+        group_by(name, condition) %>%
+        summarize(NAs = any(is.na(intensity))) %>%
+        filter(NAs) %>%
+        pull(name) %>%
+        unique()
+      results$imputed <- ifelse(results$name %in% proteins_imputed, "Yes", "No")
+      
+      print(
+        ggplot(results, aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]]), color = imputed, shape = imputed, fill = imputed)) +
+          geom_point(alpha = 0.5) +
+          scale_shape_manual(name = "Imputed", values = c("No" = 21, "Yes" = 22)) +
+          scale_fill_manual(name = "Imputed", values = c("No" = "#72B173", "Yes" = "#492050")) +
+          scale_color_manual(name = "Imputed", values = c("No" = "#72B173", "Yes" = "#492050")) +
+          geom_text_repel(data = results[results$name %in% proteins_to_highlight, ],
+                          aes(label = name),
+                          color = "black",
+                          max.overlaps = Inf,
+                          size = 3) +
+          geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey50") +
+          geom_vline(xintercept = c(-2, 2), linetype = "dashed", color = "grey50") +
+          theme_bw(base_size = 12) +
+          xlab(paste0("log2 FC (", contrast, ")")) +
+          ylab("-log10(p-value)") +
+          ggtitle(paste0(left, " vs ", right)) +
+          theme(
+            legend.position = c(0.90, 0.10),   # (x, y) coordinates in relative units (0–1)
+            legend.background = element_rect(fill = alpha("white", 0.8), color = "black"),
+            legend.key = element_blank()
+          ) +
+          guides(fill = guide_legend(override.aes = list(shape = c(21, 22))),
+                 color = guide_legend(override.aes = list(color = c("#72B173", "#492050"))),
+                 shape = guide_legend(override.aes = list(fill = c("#72B173", "#492050")))) 
+        
+      )
+    }
+    
   }
   dev.off()
   
@@ -219,12 +274,12 @@ if (parameters$conditions == 2) {
     names(df) <- paste0(names(df), "_normalized")
     df$name <- row.names(df)
     datalist[["normalized"]] <- df  
-    #imputated
+    #imputed
     if (parameters$filtering_type == "condition") {
       df <- as.data.frame(assay(data_imp))
-      names(df) <- paste0(names(df), "_imputated")
+      names(df) <- paste0(names(df), "_imputed")
       df$name <- row.names(df)
-      datalist[["imputated"]] <- df
+      datalist[["imputed"]] <- df
     }
     complete_data <- purrr::reduce(datalist, merge, by = "name")
     complete_data <- merge(complete_data, get_results(dep))
@@ -254,12 +309,8 @@ if (parameters$conditions == 3) {
     value_columns <- which(sapply(data, is.numeric))
     
     experimental_design <- data.frame(label = colnames(data[, value_columns]))
-    experimental_design <- experimental_design %>% separate_wider_delim(
-      label,
-      delim = "_",
-      names = c("condition", "replicate"),
-      cols_remove = FALSE
-    )
+    experimental_design <- experimental_design %>% 
+      extract(label, into = c("condition", "replicate"), regex = "^(.*)_(.*)$", remove = FALSE)
     experimental_design <- experimental_design[, c("label", "condition", "replicate")]
     data_se <- make_se(data, value_columns, experimental_design)
     data_filt <- filter_proteins(data_se, type = parameters$filtering_type, thr = 0)
@@ -270,7 +321,14 @@ if (parameters$conditions == 3) {
     if (parameters$filtering_type == "condition") {
       data_imp <- impute(data_norm, fun = "MinProb", q = 0.01)
     }
-    data_diff_manual <- test_diff(data_imp, type = parameters$comparison, control = parameters$control)
+    if (parameters$comparison == "control") {
+      data_diff_manual <- test_diff(data_imp, type = "control", control = parameters$control)
+    } else if (parameters$comparison == "manual") {
+      manual_contrasts <- str_split(parameters$contrasts, ";")[[1]]
+      data_diff_manual <- test_diff(data_imp, type = "manual", test = manual_contrasts)
+    } else if (parameters$comparison == "all") {
+      data_diff_manual <- test_diff(data_imp, type = "all")
+    }
     contrast <- sub("_diff", "", str_subset(
       names(data_diff_manual@elementMetadata@listData),
       "_diff"
@@ -285,8 +343,14 @@ if (parameters$conditions == 3) {
     if (parameters$filtering_type == "condition") {
       print(plot_detect(data_filt))
     }
-    print(plot_normalization(data_filt, data_norm, data_imp))
-    print(plot_imputation(data_norm, data_imp))
+    if (parameters$filtering_type == "condition") {
+      print(plot_normalization(data_filt, data_norm, data_imp))
+    } else {
+      print(plot_normalization(data_filt, data_norm))
+    }
+    if (parameters$filtering_type == "condition") {
+      print(plot_imputation(data_norm, data_imp))
+    }
     
     #add dataframe for each contrast to list
     for (p in 1:length(contrast)) {
@@ -314,16 +378,60 @@ if (parameters$conditions == 3) {
         proteins_to_highlight <- head(sorted_results[sorted_results[[p_val_column]] < 0.05, ], parameters$TopN)$name
       }
       
-      print(ggplot(results, aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]]))) + 
-              geom_point(color = "grey50", alpha = 0.5) +
-              geom_point(data = results[results$name%in%proteins_to_highlight, ], aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]])), color = "red", alpha = 0.5) +
-              geom_text_repel(data = results[results$name%in%proteins_to_highlight, ], aes(label = name)) +
-              geom_hline(yintercept = -log10(parameters$p_value),linetype="dashed", color = "black") +
-              geom_vline(xintercept = c(-parameters$log2_FC, parameters$log2_FC),linetype="dashed", color = "black") +
-              theme_bw(base_size = 12) +
-              xlab(paste0("log2 FC (", left, " / ", right, ")")) +
-              ylab("-log10(p-value)") +
-              ggtitle(paste0(left, " vs ", right)))
+      print(
+        ggplot(results, aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]]))) +
+          geom_point(color = "grey60", alpha = 0.5) +
+          geom_point(data = results[results$name %in% proteins_to_highlight, ],
+                     color = "#E41A1C",
+                     alpha = 0.5) +
+          geom_text_repel(data = results[results$name %in% proteins_to_highlight, ],
+                          aes(label = name),
+                          max.overlaps = Inf,
+                          size = 3) +
+          geom_hline(yintercept = -log10(parameters$p_value), linetype = "dashed", color = "grey50") +
+          geom_vline(xintercept = c(-parameters$log2_FC, parameters$log2_FC), linetype = "dashed", color = "grey50") +
+          theme_bw(base_size = 12) +
+          xlab(paste0("log2 FC (", left, " / ", right, ")")) +
+          ylab("-log10(p-value)") +
+          ggtitle(paste0(left, " vs ", right))
+      )
+      
+      if (parameters$highlight_imputed == TRUE) {
+        proteins_imputed <- get_df_long(data_norm) %>%
+          group_by(name, condition) %>%
+          summarize(NAs = any(is.na(intensity))) %>%
+          filter(NAs) %>%
+          pull(name) %>%
+          unique()
+        results$imputed <- ifelse(results$name %in% proteins_imputed, "Yes", "No")
+        
+        print(
+          ggplot(results, aes(x = .data[[log2_fc_column]], y = -log10(.data[[p_val_column]]), color = imputed, shape = imputed, fill = imputed)) +
+            geom_point(alpha = 0.5) +
+            scale_shape_manual(name = "Imputed", values = c("No" = 21, "Yes" = 22)) +
+            scale_fill_manual(name = "Imputed", values = c("No" = "#72B173", "Yes" = "#492050")) +
+            scale_color_manual(name = "Imputed", values = c("No" = "#72B173", "Yes" = "#492050")) +
+            geom_text_repel(data = results[results$name %in% proteins_to_highlight, ],
+                            aes(label = name),
+                            max.overlaps = Inf,
+                            size = 3) +
+            geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey50") +
+            geom_vline(xintercept = c(-2, 2), linetype = "dashed", color = "grey50") +
+            theme_bw(base_size = 12) +
+            xlab(paste0("log2 FC (", contrast, ")")) +
+            ylab("-log10(p-value)") +
+            ggtitle(paste0(left, " vs ", right)) +
+            theme(
+              legend.position = c(0.90, 0.10),   # (x, y) coordinates in relative units (0–1)
+              legend.background = element_rect(fill = alpha("white", 0.8), color = "black"),
+              legend.key = element_blank()
+            ) +
+            guides(fill = guide_legend(override.aes = list(shape = c(21, 22))),
+                   color = guide_legend(override.aes = list(color = c("#72B173", "#492050"))),
+                   shape = guide_legend(override.aes = list(fill = c("#72B173", "#492050")))) 
+          
+        )
+      }
     }
     dev.off()
     
@@ -339,12 +447,12 @@ if (parameters$conditions == 3) {
       names(df) <- paste0(names(df), "_normalized")
       df$name <- row.names(df)
       datalist[["normalized"]] <- df  
-      #imputated
+      #imputed
       if (parameters$filtering_type == "condition") {
         df <- as.data.frame(assay(data_imp))
-        names(df) <- paste0(names(df), "_imputated")
+        names(df) <- paste0(names(df), "_imputed")
         df$name <- row.names(df)
-        datalist[["imputated"]] <- df
+        datalist[["imputed"]] <- df
       }
       complete_data <- purrr::reduce(datalist, merge, by = "name")
       complete_data <- merge(complete_data, get_results(dep))
