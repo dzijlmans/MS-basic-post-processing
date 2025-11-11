@@ -22,7 +22,9 @@ Explanations are also present in the Excel file, when hovering over the paramete
 
 ```mass_spec``` - This should be present in the names of the .raw files. Required when selecting DiaNN as analysis method.
 
-```comparison``` - The type of comparison that will be tested. This can be all possible pairwise comparisons ("all") or limited to the comparisons versus the control ("control").
+```comparison``` - The type of comparison that will be tested. This can be all possible pairwise comparisons ("all"), a manual selection ("manual") or limited to the comparisons versus the control ("control").
+
+```contrasts``` - In case you choose "manual" as your comparison, add the comparisons you would like to make, separated by a semicolon. E.g. C1_vs_DMSO;DMSO_vs_IgG
 
 ```control``` - In case you choose "control" as your comparison, add the name of the control sample, e.g. DMSO, IgG, untreated, KO.
 
@@ -37,6 +39,8 @@ Explanations are also present in the Excel file, when hovering over the paramete
 ```log2_FC``` - log2 FC value cutoff for significance. **REQUIRED**
 
 ```TopN``` - TopN number of proteins to highlight.
+
+```highlight_imputed``` - If set to TRUE, a secondary volcano plot will be generated, highlighting which proteins were (partially) imputed.
 
 ```complete_output``` - If set to TRUE, the 'DEP_results' output file will contain a tab titled 'complete_output' containing the raw, normalized and imputated LFQ values for each sample, as well as all columns from the dep results object.
 
