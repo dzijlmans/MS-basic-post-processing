@@ -64,6 +64,11 @@ Example: ```HCT116_untreated_1```.
 
 For DiaNN, this information should also be included in the ```.raw``` files. Example: ```20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw```
 
+## Per contrast comparisons
+From version v0.2.0 onwards, the analysis will run per contrast (= comparison), as opposed to on the dataset as a whole. This was done to avoid unnecessary overfiltering and over- or under-imputing.
+
+If you have multiple contrasts in your experiment, this means less proteins will be filtered out if you filtered for at least one complete condition. Additionally, imputation is more accurate since the imputed values are only based on the conditions involved and missingness patterns reflect only the biology of that comparison.
+
 ## Credit
 
 This script uses a lot of the DEP package, so credit to them for developing the package [(Zhang X, Smits A, van Tilburg G, Ovaa H, Huber W, Vermeulen M (2018). “Proteome-wide identification of ubiquitin interactions using UbIA-MS.” Nature Protocols, 13, 530–550)](https://www.nature.com/articles/nprot.2017.147).
