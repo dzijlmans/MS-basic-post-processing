@@ -10,9 +10,9 @@
 #
 #  The workflow includes:
 #    - Import and pre-processing (contaminant and peptide filtering)
-#    - Filtering and normalization using the DEP package
-#    - Differential enrichment testing
-#    - QC and Volcano plotting
+#    - Filtering and normalization using the DEP package, per contrast
+#    - Differential enrichment testing, per contrast
+#    - QC and Volcano plotting, per contrast
 #    - Export of results to browsable Excel file
 #
 #  The script supports experiments with:
@@ -20,8 +20,8 @@
 #    - 3 conditions  (e.g., additional grouping variable)
 #  
 #  Outputs:
-#    - Output_plots.pdf (QC and volcano plots)
-#    - DEP_results.xlsx (results and optionally full data)
+#    - Output_plots_*.pdf (QC and volcano plots for each contrast)
+#    - DEP_results.xlsx (Differential analysis results and raw data)
 #    - .RData workspace (for reproducibility)
 # ------------------------------------------------------------
 
@@ -39,6 +39,18 @@ parameters <- read.xlsx("Analysis_parameters.xlsx")
 
 message(paste0("Processing data from ", parameters$analysis_method))
 
+# Helper functions
+extract_conditions <- function(df) {
+  sample_cols <- colnames(df)[grepl("_[0-9]+$", colnames(df))]
+  conds <- unique(sub("_[0-9]+$", "", sample_cols))
+  return(conds)
+}
+
+make_df <- function(se, suffix) {
+  as.data.frame(assay(se)) %>%
+    setNames(paste0(names(.), suffix)) %>%
+    tibble::rownames_to_column("name")
+}
 
 # ------------------------------------------------------------
 #  DIA-NN Pre-processing
@@ -165,7 +177,7 @@ if (parameters$analysis_method == "Proteome Discoverer") {
   # Filter on number of unique peptides
   proteinGroups <- proteinGroups %>% filter(Number.of.Unique.Peptides > (parameters$unique_peptides - 1))
   
-  unique_peptides <- proteinGroups %>% select(Protein.IDS = Accession, Unique.peptides = Number.of.Unique.Peptides)
+  unique_peptides <- proteinGroups %>% select(Protein.IDs = Accession, Unique.peptides = Number.of.Unique.Peptides)
   
   # Tidy column names
   proteinGroups <- proteinGroups %>% dplyr::select(
@@ -184,17 +196,6 @@ if (parameters$analysis_method == "Proteome Discoverer") {
 
 
 # ------------------------------------------------------------
-#  Quality Control (QC) Checks
-# ------------------------------------------------------------
-
-try(if (max(str_count(colnames(proteinGroups[, value_columns]), "_")) == 1 &
-        parameters$conditions != 2 |
-        max(str_count(colnames(proteinGroups[, value_columns]), "_")) == 2 &
-        parameters$conditions != 3)
-  stop("Incorrect number of conditions"))
-
-
-# ------------------------------------------------------------
 #  DEP Analysis (2 conditions)
 # ------------------------------------------------------------
 
@@ -203,85 +204,119 @@ if (parameters$conditions == 2) {
   results_A <- list()
   data <- proteinGroups
   
-  # Create experimental design
-  experimental_design <- data.frame(label = colnames(data[, value_columns]))
-  experimental_design <- experimental_design %>% 
-    extract(label, into = c("condition", "replicate"), regex = "^(.*)_(.*)$", remove = FALSE)
-  experimental_design <- experimental_design[, c("label", "condition", "replicate")]
-  
-  # DEP filtering and normalization
-  data_se <- make_se(data, value_columns, experimental_design)
-  data_filt <- filter_proteins(data_se, type = parameters$filtering_type, thr = 0)
-  data_norm <- normalize_vsn(data_filt)
-  if (parameters$filtering_type == "complete") {
-    data_imp <- data_norm
-  }
-  if (parameters$filtering_type == "condition") {
-    data_imp <- impute(data_norm, fun = "MinProb", q = 0.01)
+  # Contrast extraction
+  contrasts <- NULL
+  if (parameters$comparison == "manual") {
+    raw <- parameters$contrasts
+    contrasts <- str_split(raw, "[;]")[[1]] %>% trimws()
+  } else if (parameters$comparison == "control") {
+    ctrl <- parameters$control
+    conds <- extract_conditions(data)
+    contrasts <- paste0(conds[!conds %in% ctrl], "_vs_", ctrl)
+  } else if (tolower(parameters$comparison) == "all") {
+    conds <- extract_conditions(data)
+    pairs <- combn(conds, 2, simplify = FALSE)
+    contrasts <- vapply(pairs, function(x) paste0(x[1], "_vs_", x[2]), character(1))
   }
   
-  # Differential enrichment analysis
-  if (parameters$comparison == "control") {
-    data_diff_manual <- test_diff(data_imp, type = "control", control = parameters$control)
-  } else if (parameters$comparison == "manual") {
-    manual_contrasts <- str_split(parameters$contrasts, ";")[[1]]
-    data_diff_manual <- test_diff(data_imp, type = "manual", test = manual_contrasts)
-  } else if (parameters$comparison == "all") {
-    data_diff_manual <- test_diff(data_imp, type = "all")
-  }
+  message("Contrasts to run for: ", paste(contrasts, collapse = ", "))
   
-  contrast <- sub("_diff", "", str_subset(
-    names(data_diff_manual@elementMetadata@listData),
-    "_diff"
-  ))
-  dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
-  
-  # Generate QC and volcano plots
-  pdf("Output_plots.pdf")
-  
-  print(plot_frequency(data_se))
-  print(plot_numbers(data_filt))
-  if (parameters$filtering_type == "condition") {
-    print(plot_detect(data_filt))
-  }
-  if (parameters$filtering_type == "condition") {
-    print(plot_normalization(data_filt, data_norm, data_imp))
-  } else {
-    print(plot_normalization(data_filt, data_norm))
-  }
-  if (parameters$filtering_type == "condition") {
-    print(plot_imputation(data_norm, data_imp))
-  }
-  
-  # Generate Volcano plot for each contrast
-  for (p in 1:length(contrast)) {
+  # Per contrast analysis loop
+  for (contrast in contrasts) {
     
-    results <- get_results(dep) %>% select(name, ID, contains(contrast[p]) &
+    message("Analyzing contrast ", contrast, "...")
+    
+    left <- str_split(contrast, pattern = "_vs_")[[1]][1]
+    right <- str_split(contrast, pattern = "_vs_")[[1]][2]
+    
+    contrast_columns <- grep(paste0("^(", left, "|", right, ")_"), colnames(data), value = TRUE)
+    contrast_data <- data[, c("name","ID","Protein.IDs", contrast_columns)]
+    
+    # Create experimental design
+    experimental_design <- data.frame(label = contrast_columns)
+    experimental_design <- experimental_design %>% 
+      extract(label, into = c("condition", "replicate"), regex = "^(.*)_(.*)$", remove = FALSE)
+    experimental_design <- experimental_design[, c("label", "condition", "replicate")]
+    
+    # DEP filtering, normalization and differential analysis
+    value_columns_contrast <- which(names(contrast_data) %in% contrast_columns)
+    data_se <- make_se(contrast_data, value_columns_contrast, experimental_design)
+    data_filt <- filter_proteins(data_se, type = parameters$filtering_type, thr = 0)
+    data_norm <- normalize_vsn(data_filt)
+    if (parameters$filtering_type == "complete") {
+      data_imp <- data_norm
+    }
+    if (parameters$filtering_type == "condition") {
+      proteins_MNAR <- get_df_long(data_norm) %>%
+        group_by(name, condition) %>%
+        summarize(NAs = all(is.na(intensity))) %>% 
+        filter(NAs) %>% 
+        pull(name) %>% 
+        unique()
+      MNAR <- names(data_norm) %in% proteins_MNAR
+      data_imp <- impute(
+        data_norm, 
+        fun = "mixed",
+        randna = !MNAR,
+        mar = "knn",
+        mnar = "MinProb") 
+    }
+    data_diff_manual <- test_diff(data_imp, type = "manual", test = contrast)
+    dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
+    
+    # Extract and store results
+    results <- get_results(dep) %>% select(name, ID, contains(contrast) &
                                              (contains("p.val") | contains("ratio")))
     colnames(results) <- sub("ratio", "log2.FC", colnames(results))
-    results <- results %>% mutate(!!paste0(contrast[p], "_p.adj") := p.adjust(get(paste0(contrast[p], "_p.val")), method = "BH"))
-    results_A[[contrast[p]]] <- results
+    results <- results %>% mutate(!!paste0(contrast, "_p.adj") := p.adjust(get(paste0(contrast, "_p.val")), method = "BH"))
+
+    raw_df  <- make_df(data_filt, "_raw")
+    norm_df <- make_df(data_norm, "_normalized")
     
-    left <- str_split(contrast[p], pattern = "_vs_")[[1]][1]
-    right <- str_split(contrast[p], pattern = "_vs_")[[1]][2]
-    p_val_column <- grep("_p.val$", names(results), value = TRUE)
-    log2_fc_column <- grep("_log2.FC$", names(results), value = TRUE)
+    merged_data <- merge(raw_df, norm_df, by = "name")
+    
+    if (parameters$filtering_type == "condition") {
+      imp_df <- make_df(data_imp, "_imputed")
+      merged_data <- merge(merged_data, imp_df, by = "name")
+    }
+    
+    results_A[[contrast]] <- merged_data %>%
+      merge(results, by = "name") %>%
+      left_join(proteinGroups[, c("ID", "Protein.IDs")], by = "ID") %>%
+      left_join(unique_peptides, by = "Protein.IDs") %>%
+      select(-Protein.IDs)
     
     # Define proteins to highlight
+    p_val_column <- grep("_p.val$", names(results), value = TRUE)
+    log2_fc_column <- grep("_log2.FC$", names(results), value = TRUE)
+
     if (parameters$volcano == "protein list") {
       proteins_to_highlight <- str_split(parameters$proteins_to_highlight, ";")[[1]]
       regex_pattern <- paste0("^", proteins_to_highlight, "(\\.|$)", collapse = "|")
       matching_names <- results$name[str_detect(results$name, regex_pattern)]
       proteins_to_highlight <- unique(c(proteins_to_highlight, matching_names))
-    }
-    
-    if (parameters$volcano == "specify significance") {
+    } else if (parameters$volcano == "specify significance") {
       proteins_to_highlight <- results$name[results[[p_val_column]] < parameters$p_value & abs(results[[log2_fc_column]]) > parameters$log2_FC]
+    } else if (parameters$volcano == "TopN") {
+      sorted_results <- results[order(abs(results[[log2_fc_column]]), decreasing = TRUE), ]
+      proteins_to_highlight <- head(sorted_results[sorted_results[[p_val_column]] < parameters$p_value, ], parameters$TopN)$name
     }
     
-    if (parameters$volcano == "TopN") {
-      sorted_results <- results[order(abs(results[[log2_fc_column]]), decreasing = TRUE), ]
-      proteins_to_highlight <- head(sorted_results[sorted_results[[p_val_column]] < 0.05, ], parameters$TopN)$name
+    # Generate QC and volcano plots
+    pdf(paste0("Output_plots_", contrast, ".pdf"))
+    
+    print(plot_frequency(data_se))
+    print(plot_numbers(data_filt))
+    if (parameters$filtering_type == "condition") {
+      print(plot_detect(data_filt))
+    }
+    if (parameters$filtering_type == "condition") {
+      print(plot_normalization(data_filt, data_norm, data_imp))
+    } else {
+      print(plot_normalization(data_filt, data_norm))
+    }
+    if (parameters$filtering_type == "condition") {
+      print(plot_imputation(data_norm, data_imp))
     }
     
     # Volcano plot
@@ -324,8 +359,8 @@ if (parameters$conditions == 2) {
                           color = "black",
                           max.overlaps = Inf,
                           size = 3) +
-          geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey50") +
-          geom_vline(xintercept = c(-2, 2), linetype = "dashed", color = "grey50") +
+          geom_hline(yintercept = -log10(parameters$p_value), linetype = "dashed", color = "grey50") +
+          geom_vline(xintercept = c(-parameters$log2_FC, parameters$log2_FC), linetype = "dashed", color = "grey50") +
           theme_bw(base_size = 12) +
           xlab(paste0("log2 FC (", contrast, ")")) +
           ylab("-log10(p-value)") +
@@ -340,49 +375,30 @@ if (parameters$conditions == 2) {
                  shape = guide_legend(override.aes = list(fill = c("#72B173", "#492050")))) 
       )
     }
+    
+    dev.off()
+    
   }
+  
+  
+  # Whole dataset
+  if (length(contrasts) > 1) {
+  whole_dataset <- make_se_parse(proteinGroups, value_columns)
+  
+  pdf(paste0("Output_plots_whole_dataset.pdf"))
+  
+  print(plot_frequency(whole_dataset))
+  print(plot_numbers(whole_dataset))
+  print(plot_normalization(whole_dataset))
   
   dev.off()
   
-  # Optional: export complete dataset
-  if (parameters$complete_output == TRUE) {
-    
-    datalist <- list()
-    
-    # Raw
-    df <- as.data.frame(assay(data_filt))
-    names(df) <- paste0(names(df), "_raw")
-    df$name <- row.names(df)
-    datalist[["raw"]] <- df
-    
-    # Normalized
-    df <- as.data.frame(assay(data_norm))
-    names(df) <- paste0(names(df), "_normalized")
-    df$name <- row.names(df)
-    datalist[["normalized"]] <- df  
-    
-    # Imputed
-    if (parameters$filtering_type == "condition") {
-      df <- as.data.frame(assay(data_imp))
-      names(df) <- paste0(names(df), "_imputed")
-      df$name <- row.names(df)
-      datalist[["imputed"]] <- df
-    }
-    
-    results_A[["complete_data"]] <- datalist %>%
-      purrr::reduce(merge, by = "name") %>%          
-      merge(get_results(dep)) %>%                    
-      select(-contains("significant"),               
-             -contains("centered"),
-             -contains("p.adj")) %>%
-      rename_with(~ sub("ratio", "log2.FC", .x)) %>%
-      left_join(proteinGroups[, c("ID", "Protein.IDs")], by = "ID") %>%
-      left_join(unique_peptides, by = "Protein.IDs") %>%
-      select(-Protein.IDs) 
   }
   
+  results_A[["Whole dataset raw"]] <- proteinGroups %>% dplyr::select(name, ID, colnames(proteinGroups[, value_columns])) %>% mutate()
+  
   write.xlsx(results_A, paste0("DEP_results.xlsx"))
-  rm(results_A)
+
 }
 
 
@@ -395,7 +411,7 @@ if (parameters$conditions == 3) {
   results_A <- list()
   
   # Pivot and split data by variable
-  proteinGroups <-
+  proteinGroups_long <-
     proteinGroups %>% pivot_longer(
       cols = all_of(value_columns),
       names_to = c("condition_B", "condition_A", "replicate"),
@@ -404,86 +420,126 @@ if (parameters$conditions == 3) {
     ) %>% pivot_wider(names_from = c("condition_A", "replicate"),
                       values_from = "values")
   
-  datalist_B <- split(proteinGroups, f = ~ proteinGroups$condition_B)
+  datalist_B <- split(proteinGroups_long, f = proteinGroups_long$condition_B)
   
-  for (i in 1:length(datalist_B)) {
+  for (i in seq_along(datalist_B)) {
+    
     name_B <- names(datalist_B[i])
     data <- datalist_B[[i]]
-    value_columns <- which(sapply(data, is.numeric))
     
-    # Create experimental design
-    experimental_design <- data.frame(label = colnames(data[, value_columns]))
-    experimental_design <- experimental_design %>% 
-      extract(label, into = c("condition", "replicate"), regex = "^(.*)_(.*)$", remove = FALSE)
-    experimental_design <- experimental_design[, c("label", "condition", "replicate")]
-    
-    # DEP filtering and normalization
-    data_se <- make_se(data, value_columns, experimental_design)
-    data_filt <- filter_proteins(data_se, type = parameters$filtering_type, thr = 0)
-    data_norm <- normalize_vsn(data_filt)
-    if (parameters$filtering_type == "complete") {
-      data_imp <- data_norm
-    }
-    if (parameters$filtering_type == "condition") {
-      data_imp <- impute(data_norm, fun = "MinProb", q = 0.01)
+    # Contrast extraction
+    contrasts <- NULL
+    if (parameters$comparison == "manual") {
+      raw <- parameters$contrasts
+      contrasts <- str_split(raw, "[;]")[[1]] %>% trimws()
+    } else if (parameters$comparison == "control") {
+      ctrl <- parameters$control
+      conds <- extract_conditions(data)
+      contrasts <- paste0(conds[!conds %in% ctrl], "_vs_", ctrl)
+    } else if (tolower(parameters$comparison) == "all") {
+      conds <- extract_conditions(data)
+      pairs <- combn(conds, 2, simplify = FALSE)
+      contrasts <- vapply(pairs, function(x) paste0(x[1], "_vs_", x[2]), character(1))
     }
     
-    # Differential enrichment analysis
-    if (parameters$comparison == "control") {
-      data_diff_manual <- test_diff(data_imp, type = "control", control = parameters$control)
-    } else if (parameters$comparison == "manual") {
-      manual_contrasts <- str_split(parameters$contrasts, ";")[[1]]
-      data_diff_manual <- test_diff(data_imp, type = "manual", test = manual_contrasts)
-    } else if (parameters$comparison == "all") {
-      data_diff_manual <- test_diff(data_imp, type = "all")
-    }
-    contrast <- sub("_diff", "", str_subset(
-      names(data_diff_manual@elementMetadata@listData),
-      "_diff"
-    ))
-    dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
+    message("Contrasts to run for: ", paste(contrasts, collapse = ", "))
     
-    # Generate QC and volcano plots
-    pdf(paste0("Output_plots_", name_B, ".pdf"))
-    
-    print(plot_frequency(data_se))
-    print(plot_numbers(data_filt))
-    if (parameters$filtering_type == "condition") {
-      print(plot_detect(data_filt))
-    }
-    if (parameters$filtering_type == "condition") {
-      print(plot_normalization(data_filt, data_norm, data_imp))
-    } else {
-      print(plot_normalization(data_filt, data_norm))
-    }
-    if (parameters$filtering_type == "condition") {
-      print(plot_imputation(data_norm, data_imp))
-    }
-    
-    # Generate Volcano plot for each contrast
-    for (p in 1:length(contrast)) {
-      results <- get_results(dep) %>% select(name, ID, contains(contrast[p]) & (contains("p.val") | contains("ratio")))
-      colnames(results) <- sub("ratio", "log2.FC", colnames(results))
-      results <- results %>% mutate(!!paste0(contrast[p], "_p.adj") := p.adjust(get(paste0(contrast[p], "_p.val")), method = "BH"))
-      results_A[[paste0(name_B, "_", contrast[p])]] <- results
+    # Per contrast analysis loop
+    for (contrast in contrasts) {
       
-      left <- str_split(contrast[p], pattern = "_vs_")[[1]][1]
-      right <- str_split(contrast[p], pattern = "_vs_")[[1]][2]
+      message("Analyzing contrast ", contrast, "...")
+      
+      left <- str_split(contrast, pattern = "_vs_")[[1]][1]
+      right <- str_split(contrast, pattern = "_vs_")[[1]][2]
+      
+      contrast_columns <- grep(paste0("^(", left, "|", right, ")_"), colnames(data), value = TRUE)
+      contrast_data <- data[, c("name","ID","Protein.IDs", contrast_columns)]
+      
+      # Create experimental design
+      experimental_design <- data.frame(label = contrast_columns)
+      experimental_design <- experimental_design %>% 
+        extract(label, into = c("condition", "replicate"), regex = "^(.*)_(.*)$", remove = FALSE)
+      experimental_design <- experimental_design[, c("label", "condition", "replicate")]
+      
+      # DEP filtering, normalization and differential analysis
+      value_columns_contrast <- which(names(contrast_data) %in% contrast_columns)
+      data_se <- make_se(contrast_data, value_columns_contrast, experimental_design)
+      data_filt <- filter_proteins(data_se, type = parameters$filtering_type, thr = 0)
+      data_norm <- normalize_vsn(data_filt)
+      if (parameters$filtering_type == "complete") {
+        data_imp <- data_norm
+      }
+      if (parameters$filtering_type == "condition") {
+        proteins_MNAR <- get_df_long(data_norm) %>%
+          group_by(name, condition) %>%
+          summarize(NAs = all(is.na(intensity))) %>% 
+          filter(NAs) %>% 
+          pull(name) %>% 
+          unique()
+        MNAR <- names(data_norm) %in% proteins_MNAR
+        data_imp <- impute(
+          data_norm, 
+          fun = "mixed",
+          randna = !MNAR,
+          mar = "knn",
+          mnar = "MinProb") 
+      }
+      data_diff_manual <- test_diff(data_imp, type = "manual", test = contrast)
+      dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
+      
+      # Extract and store results
+      results <- get_results(dep) %>% select(name, ID, contains(contrast) &
+                                               (contains("p.val") | contains("ratio")))
+      colnames(results) <- sub("ratio", "log2.FC", colnames(results))
+      results <- results %>% mutate(!!paste0(contrast, "_p.adj") := p.adjust(get(paste0(contrast, "_p.val")), method = "BH"))
+      
+      raw_df  <- make_df(data_filt, "_raw")
+      norm_df <- make_df(data_norm, "_normalized")
+      
+      merged_data <- merge(raw_df, norm_df, by = "name")
+      
+      if (parameters$filtering_type == "condition") {
+        imp_df <- make_df(data_imp, "_imputed")
+        merged_data <- merge(merged_data, imp_df, by = "name")
+      }
+      
+      results_A[[paste0(name_B, "_", contrast)]] <- merged_data %>%
+        merge(results, by = "name") %>%
+        left_join(proteinGroups[, c("ID", "Protein.IDs")], by = "ID") %>%
+        left_join(unique_peptides, by = "Protein.IDs") %>%
+        select(-Protein.IDs)
+      
+      # Define proteins to highlight
       p_val_column <- grep("_p.val$", names(results), value = TRUE)
       log2_fc_column <- grep("_log2.FC$", names(results), value = TRUE)
       
-      # Define proteins to highlight
       if (parameters$volcano == "protein list") {
         proteins_to_highlight <- str_split(parameters$proteins_to_highlight, ";")[[1]]
-      }
-      
-      if (parameters$volcano == "specify significance") {
+        regex_pattern <- paste0("^", proteins_to_highlight, "(\\.|$)", collapse = "|")
+        matching_names <- results$name[str_detect(results$name, regex_pattern)]
+        proteins_to_highlight <- unique(c(proteins_to_highlight, matching_names))
+      } else if (parameters$volcano == "specify significance") {
         proteins_to_highlight <- results$name[results[[p_val_column]] < parameters$p_value & abs(results[[log2_fc_column]]) > parameters$log2_FC]
+      } else if (parameters$volcano == "TopN") {
+        sorted_results <- results[order(abs(results[[log2_fc_column]]), decreasing = TRUE), ]
+        proteins_to_highlight <- head(sorted_results[sorted_results[[p_val_column]] < parameters$p_value, ], parameters$TopN)$name
       }
       
-      if (parameters$volcano == "TopN") {
-        sorted_results <- results[order(abs(results[[log2_fc_column]]), decreasing = TRUE), ]
-        proteins_to_highlight <- head(sorted_results[sorted_results[[p_val_column]] < 0.05, ], parameters$TopN)$name
+      # Generate QC and volcano plots
+      pdf(paste0("Output_plots_", name_B, "_", contrast, ".pdf"))
+      
+      print(plot_frequency(data_se))
+      print(plot_numbers(data_filt))
+      if (parameters$filtering_type == "condition") {
+        print(plot_detect(data_filt))
+      }
+      if (parameters$filtering_type == "condition") {
+        print(plot_normalization(data_filt, data_norm, data_imp))
+      } else {
+        print(plot_normalization(data_filt, data_norm))
+      }
+      if (parameters$filtering_type == "condition") {
+        print(plot_imputation(data_norm, data_imp))
       }
       
       # Volcano plot
@@ -523,10 +579,11 @@ if (parameters$conditions == 3) {
             scale_color_manual(name = "Imputed", values = c("No" = "#72B173", "Yes" = "#492050")) +
             geom_text_repel(data = results[results$name %in% proteins_to_highlight, ],
                             aes(label = name),
+                            color = "black",
                             max.overlaps = Inf,
                             size = 3) +
-            geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "grey50") +
-            geom_vline(xintercept = c(-2, 2), linetype = "dashed", color = "grey50") +
+            geom_hline(yintercept = -log10(parameters$p_value), linetype = "dashed", color = "grey50") +
+            geom_vline(xintercept = c(-parameters$log2_FC, parameters$log2_FC), linetype = "dashed", color = "grey50") +
             theme_bw(base_size = 12) +
             xlab(paste0("log2 FC (", contrast, ")")) +
             ylab("-log10(p-value)") +
@@ -539,56 +596,32 @@ if (parameters$conditions == 3) {
             guides(fill = guide_legend(override.aes = list(shape = c(21, 22))),
                    color = guide_legend(override.aes = list(color = c("#72B173", "#492050"))),
                    shape = guide_legend(override.aes = list(fill = c("#72B173", "#492050")))) 
-          
         )
       }
+      
+      dev.off()
+      
     }
-    
-    dev.off()
-    
-    # Optional: export complete dataset
-    if (parameters$complete_output == TRUE) {
-      
-      datalist <- list()
-      
-      # Raw
-      df <- as.data.frame(assay(data_filt))
-      names(df) <- paste0(names(df), "_raw")
-      df$name <- row.names(df)
-      datalist[["raw"]] <- df
-      
-      # Normalized
-      df <- as.data.frame(assay(data_norm))
-      names(df) <- paste0(names(df), "_normalized")
-      df$name <- row.names(df)
-      datalist[["normalized"]] <- df  
-      
-      # Imputed
-      if (parameters$filtering_type == "condition") {
-        df <- as.data.frame(assay(data_imp))
-        names(df) <- paste0(names(df), "_imputed")
-        df$name <- row.names(df)
-        datalist[["imputed"]] <- df
-      }
-      
-      results_A[[paste0(name_B, "_complete_data")]] <- datalist %>%
-        purrr::reduce(merge, by = "name") %>%          
-        merge(get_results(dep)) %>%                    
-        select(-contains("significant"),               
-               -contains("centered"),
-               -contains("p.adj")) %>%
-        rename_with(~ sub("ratio", "log2.FC", .x)) %>%
-        left_join(proteinGroups[, c("ID", "Protein.IDs")], by = "ID") %>%
-        left_join(unique_peptides, by = "Protein.IDs") %>%
-        select(-Protein.IDs)
-    }
-    
-  }
+   
+  } 
+  
+  # Whole dataset
+  whole_dataset <- make_se_parse(proteinGroups, value_columns)
+  
+  pdf(paste0("Output_plots_whole_dataset.pdf"))
+  
+  print(plot_frequency(whole_dataset))
+  print(plot_numbers(whole_dataset))
+  print(plot_normalization(whole_dataset))
+  
+  dev.off()
+  
+  
+  results_A[["Whole dataset raw"]] <- proteinGroups %>% dplyr::select(name, ID, colnames(proteinGroups[, value_columns])) %>% mutate()
   
   write.xlsx(results_A, paste0("DEP_results.xlsx"))
-  rm(results_A)
+  
 }
-
 
 # ------------------------------------------------------------
 # Save workspace and session info
