@@ -46,10 +46,39 @@ extract_conditions <- function(df) {
   return(conds)
 }
 
+
 make_df <- function(se, suffix) {
   as.data.frame(assay(se)) %>%
     setNames(paste0(names(.), suffix)) %>%
     tibble::rownames_to_column("name")
+}
+
+
+impute_mixed_SE <- function(SE, q = 0.01, k = 10) {
+  
+  require(tidyverse)
+  require(DEP)
+  
+  df_long <- get_df_long(SE)
+  
+  proteins_MNAR <- df_long %>%
+    group_by(name, condition) %>%
+    summarize(all_missing = all(is.na(intensity)), .groups = "drop") %>%
+    filter(all_missing) %>%
+    pull(name) %>%
+    unique()
+  
+  X <- assay(SE)
+  MNAR_rows <- rownames(X) %in% proteins_MNAR
+  mnar_matrix <- is.na(X) & MNAR_rows
+  
+  SE_knn <- DEP::impute(SE, fun = "knn", k = k)
+  Y <- assay(SE_knn)
+  Y[mnar_matrix] <- NA
+  assay(SE_knn) <- Y
+  SE_imputed <- DEP::impute(SE_knn, fun = "MinProb", q = 0.01)
+  return(SE_imputed)
+  
 }
 
 # ------------------------------------------------------------
@@ -247,19 +276,7 @@ if (parameters$conditions == 2) {
       data_imp <- data_norm
     }
     if (parameters$filtering_type == "condition") {
-      proteins_MNAR <- get_df_long(data_norm) %>%
-        group_by(name, condition) %>%
-        summarize(NAs = all(is.na(intensity))) %>% 
-        filter(NAs) %>% 
-        pull(name) %>% 
-        unique()
-      MNAR <- names(data_norm) %in% proteins_MNAR
-      data_imp <- impute(
-        data_norm, 
-        fun = "mixed",
-        randna = !MNAR,
-        mar = "knn",
-        mnar = "MinProb") 
+      data_imp <- impute_mixed_SE(data_norm)
     }
     data_diff_manual <- test_diff(data_imp, type = "manual", test = contrast)
     dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
@@ -470,19 +487,7 @@ if (parameters$conditions == 3) {
         data_imp <- data_norm
       }
       if (parameters$filtering_type == "condition") {
-        proteins_MNAR <- get_df_long(data_norm) %>%
-          group_by(name, condition) %>%
-          summarize(NAs = all(is.na(intensity))) %>% 
-          filter(NAs) %>% 
-          pull(name) %>% 
-          unique()
-        MNAR <- names(data_norm) %in% proteins_MNAR
-        data_imp <- impute(
-          data_norm, 
-          fun = "mixed",
-          randna = !MNAR,
-          mar = "knn",
-          mnar = "MinProb") 
+        data_imp <- impute_mixed_SE(data_norm)
       }
       data_diff_manual <- test_diff(data_imp, type = "manual", test = contrast)
       dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
