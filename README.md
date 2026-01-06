@@ -64,7 +64,14 @@ Example: ```HCT116_untreated_1```.
 
 For DiaNN, this information should also be included in the ```.raw``` files. Example: ```20250205_Astral_AUR_DZ114_Wildtype_untreated_1.raw```
 
-## Per contrast comparisons
+## Recent updates
+
+### Imputation
+From version v0.2.1 onwards, imputation is set to mixed with default set to ```knn``` for MAR and ```MinProb``` for MNAR data. Imputation methods and parameters can be specified in the script.
+
+If the imputation method entered for MAR and MNAR is the same, imputation will be done as one on the whole dataset (see function for details) using the arguments specified for MAR imputation.
+
+### Per contrast comparisons
 From version v0.2.0 onwards, the analysis will run per contrast (= comparison), as opposed to on the dataset as a whole. This was done to avoid unnecessary overfiltering and over- or under-imputing.
 
 If you have multiple contrasts in your experiment, this means less proteins will be filtered out if you filtered for at least one complete condition. Additionally, imputation is more accurate since the imputed values are only based on the conditions involved and missingness patterns reflect only the biology of that comparison.
