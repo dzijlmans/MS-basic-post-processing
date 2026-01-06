@@ -54,32 +54,44 @@ make_df <- function(se, suffix) {
 }
 
 
-impute_mixed_SE <- function(SE, q = 0.01, k = 10) {
-  
+impute_mixed <- function(SE,
+                         MAR_method = "knn",
+                         MNAR_method = "MinProb",
+                         MAR_args = list(k = 10),
+                         MNAR_args = list(q = 0.01)) {
   require(tidyverse)
   require(DEP)
+  require(SummarizedExperiment)
   
-  df_long <- get_df_long(SE)
-  
-  proteins_MNAR <- df_long %>%
-    group_by(name, condition) %>%
-    summarize(all_missing = all(is.na(intensity)), .groups = "drop") %>%
-    filter(all_missing) %>%
-    pull(name) %>%
-    unique()
-  
-  X <- assay(SE)
-  MNAR_rows <- rownames(X) %in% proteins_MNAR
-  mnar_matrix <- is.na(X) & MNAR_rows
-  
-  SE_knn <- DEP::impute(SE, fun = "knn", k = k)
-  Y <- assay(SE_knn)
-  Y[mnar_matrix] <- NA
-  assay(SE_knn) <- Y
-  SE_imputed <- DEP::impute(SE_knn, fun = "MinProb", q = 0.01)
-  return(SE_imputed)
+  if (MAR_method == MNAR_method) {
+    print("Imputing for MAR and MNAR together (non-mixed)")
+    SE_final <- do.call(DEP::impute, c(list(SE, fun = MAR_method), MAR_args))
+    return(SE_final)
+  } else {
+    df_long <- get_df_long(SE)
+    
+    proteins_MNAR <- df_long %>%
+      group_by(name, condition) %>%
+      summarize(all_missing = all(is.na(intensity)), .groups = "drop") %>%
+      filter(all_missing) %>%
+      pull(name) %>%
+      unique()
+    
+    X <- assay(SE)
+    MNAR_rows <- rownames(X) %in% proteins_MNAR
+    mnar_matrix <- is.na(X) & MNAR_rows
+    
+    SE_MAR <- do.call(DEP::impute, c(list(SE, fun = MAR_method), MAR_args))
+    Y <- assay(SE_MAR)
+    Y[mnar_matrix] <- NA
+    assay(SE_MAR) <- Y
+    SE_final <- do.call(DEP::impute, c(list(SE_MAR, fun = MNAR_method), MNAR_args))
+    return(SE_final)
+    
+  }
   
 }
+
 
 # ------------------------------------------------------------
 #  DIA-NN Pre-processing
@@ -230,6 +242,8 @@ if (parameters$analysis_method == "Proteome Discoverer") {
 
 if (parameters$conditions == 2) {
   
+  set.seed(123)
+  
   results_A <- list()
   data <- proteinGroups
   
@@ -276,7 +290,7 @@ if (parameters$conditions == 2) {
       data_imp <- data_norm
     }
     if (parameters$filtering_type == "condition") {
-      data_imp <- impute_mixed_SE(data_norm)
+      data_imp <- impute_mixed(data_norm)
     }
     data_diff_manual <- test_diff(data_imp, type = "manual", test = contrast)
     dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
@@ -425,6 +439,8 @@ if (parameters$conditions == 2) {
 
 if (parameters$conditions == 3) {
   
+  set.seed(123)
+  
   results_A <- list()
   
   # Pivot and split data by variable
@@ -487,7 +503,7 @@ if (parameters$conditions == 3) {
         data_imp <- data_norm
       }
       if (parameters$filtering_type == "condition") {
-        data_imp <- impute_mixed_SE(data_norm)
+        data_imp <- impute_mixed(data_norm)
       }
       data_diff_manual <- test_diff(data_imp, type = "manual", test = contrast)
       dep <- add_rejections(data_diff_manual, alpha = parameters$p_value, lfc = parameters$log2_FC)
