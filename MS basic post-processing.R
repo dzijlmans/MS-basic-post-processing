@@ -30,12 +30,18 @@
 # Loading libraries and setting parameters
 # ------------------------------------------------------------
 
-if (!require(pacman, quietly = TRUE)) install.packages("pacman")
-pacman::p_load(tidyverse, DEP, openxlsx, ggrepel, tcltk, PTXQC, SummarizedExperiment)
+library(tidyverse)
+library(DEP)
+library(openxlsx)
+library(ggrepel)
+library(tcltk)
+library(PTXQC)
+library(SummarizedExperiment)
 
 setwd(tk_choose.dir())
 
 parameters <- read.xlsx("Analysis_parameters.xlsx")
+suffix <- if (parameters$filtering_type == "condition") "_imputed" else ""
 
 message(paste0("Processing data from ", parameters$analysis_method))
 
@@ -55,9 +61,9 @@ make_df <- function(se, suffix) {
 
 
 impute_mixed <- function(SE,
-                         MAR_method = "knn",
+                         MAR_method = "bpca",
                          MNAR_method = "MinProb",
-                         MAR_args = list(k = 10),
+                         MAR_args = list(NULL),
                          MNAR_args = list(q = 0.01)) {
   require(tidyverse)
   require(DEP)
@@ -278,9 +284,8 @@ if (parameters$conditions == 2) {
     # Create experimental design
     experimental_design <- data.frame(label = contrast_columns)
     experimental_design <- experimental_design %>% 
-      extract(label, into = c("condition", "replicate"), regex = "^(.*)_(.*)$", remove = FALSE)
-    experimental_design <- experimental_design[, c("label", "condition", "replicate")]
-    
+      extract(label, into = c("condition", "replicate"), regex = "^(.*?)[_.](\\d+)$", remove = FALSE)
+
     # DEP filtering, normalization and differential analysis
     value_columns_contrast <- which(names(contrast_data) %in% contrast_columns)
     data_se <- make_se(contrast_data, value_columns_contrast, experimental_design)
@@ -334,7 +339,7 @@ if (parameters$conditions == 2) {
     }
     
     # Generate QC and volcano plots
-    pdf(paste0("Output_plots_", contrast, ".pdf"))
+    pdf(paste0("Output_plots_", contrast, suffix, ".pdf"))
     
     print(plot_frequency(data_se))
     print(plot_numbers(data_filt))
@@ -370,7 +375,7 @@ if (parameters$conditions == 2) {
     )
     
     # Optional: highlighting of imputed proteins
-    if (parameters$highlight_imputed == TRUE) {
+    if (parameters$filtering_type == "condition") {
       proteins_imputed <- get_df_long(data_norm) %>%
         group_by(name, condition) %>%
         summarize(NAs = any(is.na(intensity))) %>%
@@ -416,7 +421,7 @@ if (parameters$conditions == 2) {
   if (length(contrasts) > 1) {
   whole_dataset <- make_se_parse(proteinGroups, value_columns)
   
-  pdf(paste0("Output_plots_whole_dataset.pdf"))
+  pdf(paste0("Output_plots_whole_dataset", suffix, ".pdf"))
   
   print(plot_frequency(whole_dataset))
   print(plot_numbers(whole_dataset))
@@ -428,7 +433,7 @@ if (parameters$conditions == 2) {
   
   results_A[["Whole dataset raw"]] <- proteinGroups %>% dplyr::select(name, ID, colnames(proteinGroups[, value_columns])) %>% mutate()
   
-  write.xlsx(results_A, paste0("DEP_results.xlsx"))
+  write.xlsx(results_A, paste0("DEP_results", suffix, ".xlsx"))
 
 }
 
@@ -491,9 +496,8 @@ if (parameters$conditions == 3) {
       # Create experimental design
       experimental_design <- data.frame(label = contrast_columns)
       experimental_design <- experimental_design %>% 
-        extract(label, into = c("condition", "replicate"), regex = "^(.*)_(.*)$", remove = FALSE)
-      experimental_design <- experimental_design[, c("label", "condition", "replicate")]
-      
+        extract(label, into = c("condition", "replicate"), regex = "^(.*?)[_.](\\d+)$", remove = FALSE)
+
       # DEP filtering, normalization and differential analysis
       value_columns_contrast <- which(names(contrast_data) %in% contrast_columns)
       data_se <- make_se(contrast_data, value_columns_contrast, experimental_design)
@@ -547,7 +551,7 @@ if (parameters$conditions == 3) {
       }
       
       # Generate QC and volcano plots
-      pdf(paste0("Output_plots_", name_B, "_", contrast, ".pdf"))
+      pdf(paste0("Output_plots_", name_B, "_", contrast, suffix, ".pdf"))
       
       print(plot_frequency(data_se))
       print(plot_numbers(data_filt))
@@ -583,7 +587,7 @@ if (parameters$conditions == 3) {
       )
       
       # Optional: highlighting of imputed proteins
-      if (parameters$highlight_imputed == TRUE) {
+      if (parameters$filtering_type == "condition") {
         proteins_imputed <- get_df_long(data_norm) %>%
           group_by(name, condition) %>%
           summarize(NAs = any(is.na(intensity))) %>%
@@ -629,7 +633,7 @@ if (parameters$conditions == 3) {
   # Whole dataset
   whole_dataset <- make_se_parse(proteinGroups, value_columns)
   
-  pdf(paste0("Output_plots_whole_dataset.pdf"))
+  pdf(paste0("Output_plots_whole_dataset", suffix, ".pdf"))
   
   print(plot_frequency(whole_dataset))
   print(plot_numbers(whole_dataset))
@@ -640,7 +644,7 @@ if (parameters$conditions == 3) {
   
   results_A[["Whole dataset raw"]] <- proteinGroups %>% dplyr::select(name, ID, colnames(proteinGroups[, value_columns])) %>% mutate()
   
-  write.xlsx(results_A, paste0("DEP_results.xlsx"))
+  write.xlsx(results_A, paste0("DEP_results", suffix, ".xlsx"))
   
 }
 
@@ -648,5 +652,5 @@ if (parameters$conditions == 3) {
 # Save workspace and session info
 # ------------------------------------------------------------
 
-save.image(paste0(getwd(), paste0("/", parameters$analysis_method, " - DEP analysis.RData")))
+save.image(paste0(getwd(), paste0("/", parameters$analysis_method, " - DEP analysis", suffix, ".RData")))
 sessionInfo()
