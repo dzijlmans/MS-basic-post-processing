@@ -8,6 +8,7 @@ Getting started is easy. Download the R script and analysis parameters file to y
 - Click on the big green button in the top right that says ```<> Code``` and then click on ```Download ZIP```.
 - Place the files in your working directory
 - Fill in the analysis parameter file accordingly.
+- Run the ```install_packages``` script to install the required packages. This only needs to be done once per workstation.
 - Open the R script with RStudio, select all and [run it](https://www.youtube.com/watch?v=w6QGe-pXgdI).
 
 <ins>**Note:**</ins> - Installing the DEP package for the first time may take a while. Should be smooth sailing after that
@@ -42,8 +43,6 @@ Explanations are also present in the Excel file, when hovering over the paramete
 
 ```TopN``` - TopN number of proteins to highlight.
 
-```highlight_imputed``` - If set to TRUE, a secondary volcano plot will be generated, highlighting which proteins were (partially) imputed.
-
 ## Script input requirements
 
 ```DiaNN``` - Output files should end on ```*pg_matrix.tsv``` and ```*pr_matrix.tsv```.
@@ -67,7 +66,7 @@ For DiaNN, this information should also be included in the ```.raw``` files. Exa
 ## Recent updates
 
 ### Imputation
-From version v0.2.1 onwards, imputation is set to mixed with default set to ```knn``` for MAR and ```MinProb``` for MNAR data. Imputation methods and parameters can be specified in the script.
+From version v0.2.1 onwards, imputation is set to mixed with default set to ```bpca``` for MAR and ```MinProb``` for MNAR data. Imputation methods and parameters can be specified in the script.
 
 If the imputation method entered for MAR and MNAR is the same, imputation will be done as one on the whole dataset (see function for details) using the arguments specified for MAR imputation.
 
